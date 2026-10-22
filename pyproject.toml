@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = ["numpy==2.5.4", "rawpy==0.27.1", "imageio-ffmpeg==0.6.0", "Pillow==13.0.0"]
 
 [project.optional-dependencies]
+comparison = ["pillow-heif==1.8.1"]
 dev = ["pytest==9.1.1", "mypy==2.4.0", "cmake==3.31.10", "ninja==1.13.2"]
 
 [tool.setuptools.packages.find]

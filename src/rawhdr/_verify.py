@@ -69,7 +69,8 @@ def _decode(container: HeifFile, item: int, *, gray: bool) -> tuple[NDArray[np.u
     return np.frombuffer(completed.stdout, dtype=np.uint8).reshape(height, width, channels), coded_format[1]
 
 
-def verify_heic(path: Path, *, preview_path: Path | None = None) -> dict[str, Any]:
+def verify_heic(path: Path, *, preview_path: Path | None = None,
+                hdr_preview_path: Path | None = None, preview_max_size: int = 1600) -> dict[str, Any]:
     """Verify the supported HEIC subset; optional SDR preview uses no-clobber creation."""
     container = read_heif(path)
     tone_maps = [item for item, kind in container.types.items() if kind == b"tmap"]
@@ -106,6 +107,9 @@ def verify_heic(path: Path, *, preview_path: Path | None = None) -> dict[str, An
     hdr_max = 0.0
     changed_pixels = 0
     above_white = 0
+    diagnostic = np.empty(((height + 3) // 4, (width + 3) // 4, 3), dtype=np.uint8) if hdr_preview_path else None
+    shadow_error_sum = 0.0
+    shadow_count = 0
     # Compute every pixel in bounded strips; no libultrahdr gain-map routine is
     # used. Full target headroom has weight=1 in the ISO/Adobe gain-map equation.
     for row in range(0, height, 128):
@@ -116,14 +120,25 @@ def verify_heic(path: Path, *, preview_path: Path | None = None) -> dict[str, An
         hdr = (linear + base_offset) * np.exp2(logarithmic_gain) - alternate_offset
         if not np.isfinite(hdr).all() or float(hdr.min()) < -0.01:
             raise VerificationError("Non-finite or invalid reconstructed HDR")
+        if diagnostic is not None:
+            reduced = np.clip(hdr[::4, ::4] / 4.0, 0, 1)
+            encoded_diagnostic = np.where(reduced <= 0.0031308, reduced * 12.92,
+                                          1.055 * reduced ** (1 / 2.4) - 0.055)
+            diagnostic[row // 4:(row + hdr.shape[0] + 3) // 4] = np.rint(encoded_diagnostic * 255).astype(np.uint8)
+        shadow = (linear @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)) < 0.25
+        shadow_error_sum += float(np.sum(np.abs(hdr - linear)[shadow], dtype=np.float64))
+        shadow_count += int(np.count_nonzero(shadow)) * 3
         hdr_max = max(hdr_max, float(hdr.max()))
         changed_pixels += int(np.count_nonzero(np.max(np.abs(hdr - linear), axis=2) > 0.01))
         above_white += int(np.count_nonzero(np.max(hdr, axis=2) > 1.0))
     if preview_path is not None:
         preview = Image.fromarray(sdr)
-        preview.thumbnail((1600, 1600))
+        preview.thumbnail((preview_max_size, preview_max_size))
         with preview_path.open("xb") as stream:
             preview.save(stream, format="PNG")
+    if hdr_preview_path is not None and diagnostic is not None:
+        with hdr_preview_path.open("xb") as stream:
+            Image.fromarray(diagnostic).save(stream, format="PNG")
     return {"decoder": "FFmpeg native HEVC + independent ISO reconstruction",
             "ffmpeg_version": imageio_ffmpeg.get_ffmpeg_version(),
             "width": width, "height": height, "sdr_bits": 8, "gain_map_bits": 8,
@@ -133,4 +148,6 @@ def verify_heic(path: Path, *, preview_path: Path | None = None) -> dict[str, An
             "base_nclx": list(base_color), "hdr_nclx": list(hdr_color),
             "metadata": metadata, "hdr_finite": True, "hdr_max": hdr_max,
             "hdr_above_sdr_white_pixels": above_white, "changed_pixels": changed_pixels,
-            "decoded_pixels": width * height}
+            "decoded_pixels": width * height,
+            "shadow_mean_abs_change": shadow_error_sum / max(1, shadow_count),
+            "has_pixels_above_sdr_white": above_white > 0}

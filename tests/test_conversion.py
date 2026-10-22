@@ -55,3 +55,22 @@ def test_invalid_raw_leaves_no_output_or_temporary_results(tmp_path: Path) -> No
     assert sorted(p.name for p in tmp_path.iterdir()) == ['invalid.ARW']
     assert source.read_bytes() == b'not a RAW file'
     assert source.stat().st_mtime_ns == before.st_mtime_ns
+
+@pytest.mark.real_raw
+@pytest.mark.skipif(not os.environ.get('RAWHDR_SAMPLE'), reason='private ARW not configured')
+def test_conservative_hdr_keeps_shadows_close_to_sdr(tmp_path: Path) -> None:
+    result = convert_raw(Path(os.environ['RAWHDR_SAMPLE']), tmp_path / 'natural.heic')
+    assert result.verification is not None
+    assert result.verification['shadow_mean_abs_change'] < 0.01
+    assert result.verification['hdr_above_sdr_white_pixels'] > 0
+
+@pytest.mark.real_raw
+@pytest.mark.skipif(not os.environ.get('RAWHDR_SAMPLE'), reason='private ARW not configured')
+def test_comparison_jpeg_is_generated_from_same_raw_intents(tmp_path: Path) -> None:
+    jpeg = tmp_path / 'comparison.jpg'
+    result = convert_raw(Path(os.environ['RAWHDR_SAMPLE']), tmp_path / 'comparison.heic', comparison_jpeg=jpeg)
+    assert result.status == 'success'
+    assert jpeg.read_bytes()[:2] == b'\xff\xd8'
+    assert result.verification['comparison_jpeg']['ultrahdr_probe'] is True
+    assert result.verification['comparison_jpeg']['width'] == result.verification['width']
+    assert result.verification['comparison_jpeg']['height'] == result.verification['height']
