@@ -40,6 +40,15 @@ $pattern = 'return\s*\{\s*\.code\s*=\s*heif_error_Usage_error,\s*\.subcode\s*=\s
 if ($sourceText -match $pattern) {
   [IO.File]::WriteAllText($encoder, [regex]::Replace($sourceText, $pattern, $new))
 } elseif ($sourceText -notmatch 'return\s*\{\s*heif_error_Usage_error,\s*heif_suberror_Unsupported_parameter,\s*encoder->last_error_message\.c_str\(\)\s*\};') { throw 'Expected x265 compatibility patch site missing' }
+# Keep each HEVC slice below common decoder NAL limits for the verified 33 MP samples.
+# This does not change dimensions or claim mobile HDR compatibility.
+$slicePatch = Join-Path $PSScriptRoot 'patches/libultrahdr-hevc-slices.patch'
+$uhdrSource = Join-Path $tools 'libultrahdr'
+$ErrorActionPreference = 'Continue'
+& git -C $uhdrSource apply --reverse --check $slicePatch 2>$null
+$slicePatchApplied = $LASTEXITCODE -eq 0
+$ErrorActionPreference = 'Stop'
+if (-not $slicePatchApplied) { Run-Git @('-C', $uhdrSource, 'apply', $slicePatch) }
 function Build([string]$Name, [string]$Source, [string[]]$Options, [bool]$Install = $true) {
   $build = Join-Path $tools "build-$Name"
   & $cmake -S $Source -B $build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_INSTALL_PREFIX=$prefix" @Options

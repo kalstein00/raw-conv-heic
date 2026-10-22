@@ -74,3 +74,20 @@ def test_comparison_jpeg_is_generated_from_same_raw_intents(tmp_path: Path) -> N
     assert result.verification['comparison_jpeg']['ultrahdr_probe'] is True
     assert result.verification['comparison_jpeg']['width'] == result.verification['width']
     assert result.verification['comparison_jpeg']['height'] == result.verification['height']
+
+@pytest.mark.real_raw
+@pytest.mark.skipif(not os.environ.get('RAWHDR_COLOR_SAMPLE'), reason='private color reference not configured')
+def test_real_raw_does_not_repeat_dark_desaturated_camera_comparison(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+    source = Path(os.environ['RAWHDR_COLOR_SAMPLE'])
+    jpeg = tmp_path / 'color.jpg'
+    result = convert_raw(source, tmp_path / 'color.heic', comparison_jpeg=jpeg)
+    assert result.status == 'success'
+    import pillow_heif
+    decoded = pillow_heif.open_heif(result.output).to_pillow()
+    decoded.load()
+    assert decoded.size == (result.verification['width'], result.verification['height'])
+    checked = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / 'scripts/diagnose-color.py'),
+                              str(source.with_suffix('.HIF')), str(jpeg)], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stdout + checked.stderr

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import hashlib
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -12,6 +13,7 @@ import rawpy
 from PIL import Image
 
 from ._verify import verify_heic
+from ._tone import calibrate, encode_srgb
 
 
 @dataclass(frozen=True)
@@ -58,10 +60,20 @@ def convert_raw(source: Path, output: Path, *, comparison_jpeg: Path | None = No
             if sizes.flip not in rotations:
                 raise ValueError('Unsupported RAW orientation')
             pixels = np.rot90(pixels, rotations[sizes.flip])
+            thumbnail = raw.extract_thumb()
+            if thumbnail.format != rawpy.ThumbFormat.JPEG:  # type: ignore[attr-defined]
+                raise ValueError('PoC tone calibration requires an embedded camera JPEG preview')
+            with Image.open(io.BytesIO(thumbnail.data)) as preview:
+                preview.thumbnail((1000, 1000))
+                reference = np.asarray(preview.convert('RGB'), dtype=np.float32) / 255
+            tone = calibrate(pixels[::8, ::8].astype(np.float32) * (4 / 65535), reference)
             raw_info = {'raw_width': sizes.raw_width, 'raw_height': sizes.raw_height,
                         'crop': [x, y, width, height], 'libraw_flip': sizes.flip,
                         'linear_intermediate_bits': 16, 'bright': 0.25,
-                        'linear_scale': 4.0, 'tone_policy': 'highlight-only-v1', 'intermediate_clipped_channels': int(np.count_nonzero(pixels == 65535))}
+                        'linear_scale': 4.0, 'tone_policy': 'preview-calibrated-highlight-v2',
+                        'tone_reference': 'embedded ARW preview statistics only; no external HIF',
+                        'saturation_factor': tone.saturation,
+                        'intermediate_clipped_channels': int(np.count_nonzero(pixels == 65535))}
         height, width = pixels.shape[:2]
         # High precision linear RGB produces BOTH intents. No clipped SDR is
         # expanded to invent the HDR intent. Exposure/tone policy is PoC-only.
@@ -69,13 +81,14 @@ def convert_raw(source: Path, output: Path, *, comparison_jpeg: Path | None = No
             for row in range(0, height, 128):
                 neutral = pixels[row:row + 128].astype(np.float32) * (4.0 / 65535.0)
                 luminance = neutral @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
-                # Preserve shadows/midtones; smoothly increase highlight luminance
-                # above 0.5 up to 4x. One multiplier preserves RGB ratios.
+                # Preserve displayed SDR shadows/midtones in the HDR intent;
+                # select highlights using the original RAW luminance above 0.5.
                 boost = 1.0 + 3.0 * np.clip((luminance - 0.5) / 0.5, 0, 1) ** 2
-                hdr = neutral * boost[..., None]
-                sdr_linear = np.clip(neutral, 0, 1)
-                sdr = np.where(sdr_linear <= 0.0031308, sdr_linear * 12.92,
-                               1.055 * np.power(sdr_linear, 1.0 / 2.4) - 0.055)
+                sdr_linear = tone.render(neutral)
+                # RAW over-white residual retains information outside the SDR
+                # gamut; the boost is computed from the original linear RAW.
+                hdr = sdr_linear * boost[..., None] + np.maximum(neutral - 1, 0)
+                sdr = encode_srgb(sdr_linear)
                 rgba_hdr = np.ones((*hdr.shape[:2], 4), dtype=np.float16)
                 rgba_hdr[..., :3] = hdr
                 rgba_sdr = np.full((*hdr.shape[:2], 4), 255, dtype=np.uint8)

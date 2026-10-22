@@ -1,0 +1,9 @@
+diff --git a/lib/src/heifultrahdr.cpp b/lib/src/heifultrahdr.cpp
+--- a/lib/src/heifultrahdr.cpp
++++ b/lib/src/heifultrahdr.cpp
+@@ -490,2 +490,5 @@
++  if (mCodec == UHDR_CODEC_HEIF) {
++    HEIF_ERR_CHECK(heif_encoder_set_parameter(encoder, "x265:slices", "4"));
++  }
+   // set the encoder parameters
+   HEIF_ERR_CHECK(heif_encoder_set_lossy_quality(encoder, quality));
