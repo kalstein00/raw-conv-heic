@@ -45,10 +45,10 @@ if ($sourceText -match $pattern) {
 $slicePatch = Join-Path $PSScriptRoot 'patches/libultrahdr-hevc-slices.patch'
 $uhdrSource = Join-Path $tools 'libultrahdr'
 $ErrorActionPreference = 'Continue'
-& git -C $uhdrSource apply --reverse --check $slicePatch 2>$null
+& git -C $uhdrSource apply --unidiff-zero --reverse --check $slicePatch 2>$null
 $slicePatchApplied = $LASTEXITCODE -eq 0
 $ErrorActionPreference = 'Stop'
-if (-not $slicePatchApplied) { Run-Git @('-C', $uhdrSource, 'apply', $slicePatch) }
+if (-not $slicePatchApplied) { Run-Git @('-C', $uhdrSource, 'apply', '--unidiff-zero', $slicePatch) }
 function Build([string]$Name, [string]$Source, [string[]]$Options, [bool]$Install = $true) {
   $build = Join-Path $tools "build-$Name"
   & $cmake -S $Source -B $build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_INSTALL_PREFIX=$prefix" @Options
