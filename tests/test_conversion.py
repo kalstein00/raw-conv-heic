@@ -40,6 +40,9 @@ def test_real_arw_produces_independently_decoded_hdr_heic(tmp_path: Path) -> Non
     assert result.verification["hdr_finite"] is True
     assert result.verification["hdr_max"] > 1.0
     assert result.verification["gain_map_present"] is True
+    # A four-times-white intent must not require a ~49x display headroom
+    # before its gain map is fully applied on a real HDR screen.
+    assert result.verification['metadata']['alternate_headroom_log2'] == pytest.approx(2.0)
     assert result.output.read_bytes()[4:8] == b"ftyp"
     assert source.stat().st_mtime_ns == before.st_mtime_ns
     assert source.stat().st_size == before.st_size
@@ -88,6 +91,7 @@ def test_real_raw_does_not_repeat_dark_desaturated_camera_comparison(tmp_path: P
     decoded = pillow_heif.open_heif(result.output).to_pillow()
     decoded.load()
     assert decoded.size == (result.verification['width'], result.verification['height'])
+    assert 1.8 < result.verification['simulated_2x_display_hdr_max'] < 2.1
     checked = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / 'scripts/diagnose-color.py'),
                               str(source.with_suffix('.HIF')), str(jpeg)], capture_output=True, text=True)
     assert checked.returncode == 0, checked.stdout + checked.stderr

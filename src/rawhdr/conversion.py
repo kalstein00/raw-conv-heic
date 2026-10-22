@@ -102,7 +102,10 @@ def convert_raw(source: Path, output: Path, *, comparison_jpeg: Path | None = No
         command = [str(encoder), '-m', '0', '-p', str(scratch / 'hdr.raw'), '-y', str(scratch / 'sdr.raw'),
                    '-a', '4', '-b', '3', '-w', str(width), '-h', str(height), '-C', '0', '-c', '0',
                    '-t', '0', '-R', '1', '-q', '95', '-Q', '95', '-s', '1', '-M', '0', '-G', '1',
-                   '-D', '0', '-k', '1', '-K', '4', '-z', str(candidate)]
+                   # Linear HDR input otherwise defaults to a 10,000 nit target,
+                   # weakening gain-map application on ordinary HDR displays.
+                   # 203 nit SDR reference white * our 4x highlight intent.
+                   '-D', '0', '-k', '1', '-K', '4', '-L', '812', '-z', str(candidate)]
         completed = subprocess.run(command, env=env, capture_output=True, timeout=600)
         if completed.returncode or not candidate.is_file():
             raise RuntimeError('HEIC encoder failed: ' + (completed.stdout + completed.stderr).decode('utf-8', errors='replace')[-4000:])

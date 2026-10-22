@@ -107,6 +107,10 @@ def verify_heic(path: Path, *, preview_path: Path | None = None,
     hdr_max = 0.0
     changed_pixels = 0
     above_white = 0
+    base_headroom = metadata['base_headroom_log2']
+    alternate_headroom = metadata['alternate_headroom_log2']
+    display_weight = float(np.clip((1.0 - base_headroom) / max(alternate_headroom - base_headroom, 1e-8), 0, 1))
+    display_hdr_max = 0.0
     diagnostic = np.empty(((height + 3) // 4, (width + 3) // 4, 3), dtype=np.uint8) if hdr_preview_path else None
     shadow_error_sum = 0.0
     shadow_count = 0
@@ -118,6 +122,8 @@ def verify_heic(path: Path, *, preview_path: Path | None = None,
         g = gain_pixels[row : row + 128].astype(np.float32) / 255.0
         logarithmic_gain = minimum + np.power(g, 1.0 / gamma) * (maximum - minimum)
         hdr = (linear + base_offset) * np.exp2(logarithmic_gain) - alternate_offset
+        display_hdr = (linear + base_offset) * np.exp2(logarithmic_gain * display_weight) - alternate_offset
+        display_hdr_max = max(display_hdr_max, float(display_hdr.max()))
         if not np.isfinite(hdr).all() or float(hdr.min()) < -0.01:
             raise VerificationError("Non-finite or invalid reconstructed HDR")
         if diagnostic is not None:
@@ -147,6 +153,8 @@ def verify_heic(path: Path, *, preview_path: Path | None = None,
             "tmap_item": tone_map, "base_item": base, "gain_map_item": gain,
             "base_nclx": list(base_color), "hdr_nclx": list(hdr_color),
             "metadata": metadata, "hdr_finite": True, "hdr_max": hdr_max,
+            "simulated_2x_display_weight": display_weight,
+            "simulated_2x_display_hdr_max": display_hdr_max,
             "hdr_above_sdr_white_pixels": above_white, "changed_pixels": changed_pixels,
             "decoded_pixels": width * height,
             "shadow_mean_abs_change": shadow_error_sum / max(1, shadow_count),
